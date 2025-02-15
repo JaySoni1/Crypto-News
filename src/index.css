@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply antialiased;
+  }
+}
+
+.prose {
+  @apply max-w-none;
+}
+
+.prose a {
+  @apply text-blue-600 no-underline hover:underline;
+}
+
+.dark .prose {
+  @apply text-gray-300;
+}
+
+.dark .prose a {
+  @apply text-blue-400;
+}
