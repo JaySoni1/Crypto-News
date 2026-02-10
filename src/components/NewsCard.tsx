@@ -1,14 +1,16 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { formatDistanceToNow } from 'date-fns';
-import { Share2, ThumbsUp, ThumbsDown, MessageCircle } from 'lucide-react';
+import { Bookmark, Share2, ThumbsUp, ThumbsDown, MessageCircle } from 'lucide-react';
 import type { NewsArticle } from '../types/news';
 
 interface NewsCardProps {
   article: NewsArticle;
+  isSaved: boolean;
+  onToggleSaved: (id: number) => void;
 }
 
-export function NewsCard({ article }: NewsCardProps) {
+export function NewsCard({ article, isSaved, onToggleSaved }: NewsCardProps) {
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden transition-transform hover:scale-[1.02]">
       {article.metadata.image && (
@@ -53,7 +55,16 @@ export function NewsCard({ article }: NewsCardProps) {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <button className="hover:text-blue-600">
+            <button
+              type="button"
+              onClick={() => onToggleSaved(article.id)}
+              className={isSaved ? 'text-yellow-600 hover:text-yellow-700' : 'hover:text-yellow-600'}
+              aria-label={isSaved ? 'Unsave article' : 'Save article'}
+              title={isSaved ? 'Saved' : 'Save'}
+            >
+              <Bookmark className="w-4 h-4" fill={isSaved ? 'currentColor' : 'none'} />
+            </button>
+            <button type="button" className="hover:text-blue-600" aria-label="Share">
               <Share2 className="w-4 h-4" />
             </button>
             <span>{formatDistanceToNow(new Date(article.published_at))} ago</span>

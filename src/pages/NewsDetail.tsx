@@ -6,11 +6,14 @@ import type { NewsArticle } from '../types/news';
 
 interface NewsDetailProps {
   articles: NewsArticle[];
+  savedIds: number[];
+  onToggleSaved: (id: number) => void;
 }
 
-export function NewsDetail({ articles }: NewsDetailProps) {
+export function NewsDetail({ articles, savedIds, onToggleSaved }: NewsDetailProps) {
   const { id } = useParams<{ id: string }>();
   const article = articles.find(a => a.id === Number(id));
+  const isSaved = article ? savedIds.includes(article.id) : false;
 
   if (!article) {
     return (
@@ -124,9 +127,15 @@ export function NewsDetail({ articles }: NewsDetailProps) {
                 <MessageCircle className="w-5 h-5" />
                 <span>{article.votes.comments}</span>
               </button>
-              <button className="flex items-center gap-2 text-gray-500 dark:text-gray-400 hover:text-yellow-600">
-                <Bookmark className="w-5 h-5" />
-                <span>{article.votes.saved}</span>
+              <button
+                type="button"
+                onClick={() => onToggleSaved(article.id)}
+                className={isSaved
+                  ? 'flex items-center gap-2 text-yellow-600 hover:text-yellow-700'
+                  : 'flex items-center gap-2 text-gray-500 dark:text-gray-400 hover:text-yellow-600'}
+              >
+                <Bookmark className="w-5 h-5" fill={isSaved ? 'currentColor' : 'none'} />
+                <span>{isSaved ? 'Saved' : 'Save'}</span>
               </button>
             </div>
             <div className="flex items-center gap-4">

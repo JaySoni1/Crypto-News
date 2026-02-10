@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import axios from 'axios';
 import { Moon, Sun } from 'lucide-react';
@@ -7,6 +7,7 @@ import { NewsFilters } from './components/NewsFilters';
 import { SearchBar } from './components/SearchBar';
 import { TrendingKeywords } from './components/TrendingKeywords';
 import { NewsDetail } from './pages/NewsDetail';
+import { fetchLatestNews } from './services/cryptoCompareNews';
 import type { NewsArticle, NewsFilter } from './types/news';
 
 // Sample data for demonstration
@@ -81,47 +82,121 @@ const SAMPLE_ARTICLES: NewsArticle[] = [
   }
 ];
 
+const SAVED_IDS_KEY = 'crypto_news_saved_ids_v1';
+
+function includesAny(text: string, needles: string[]): boolean {
+  const hay = text.toLowerCase();
+  return needles.some((n) => hay.includes(n));
+}
+
+function filterAndSortArticles(params: {
+  all: NewsArticle[];
+  filter: NewsFilter;
+  search: string;
+  savedIds: number[];
+}): NewsArticle[] {
+  const { all, filter, search, savedIds } = params;
+  const q = search.trim().toLowerCase();
+
+  const matchesSearch = (a: NewsArticle) => {
+    if (!q) return true;
+    if (a.title.toLowerCase().includes(q)) return true;
+    if (a.metadata.tags?.some((t) => t.toLowerCase().includes(q))) return true;
+    return a.currencies.some((c) => c.code.toLowerCase().includes(q) || c.title.toLowerCase().includes(q));
+  };
+
+  let filtered = all.filter(matchesSearch);
+
+  if (filter === 'saved') {
+    const set = new Set(savedIds);
+    filtered = filtered.filter((a) => set.has(a.id));
+  } else if (filter === 'bullish' || filter === 'bearish') {
+    const bullish = ['surge', 'rally', 'breakout', 'soar', 'gain', 'bull', 'up', 'higher', 'records', 'ath'];
+    const bearish = ['drop', 'plunge', 'sell-off', 'crash', 'dump', 'bear', 'down', 'lower', 'loss', 'slump'];
+    const needles = filter === 'bullish' ? bullish : bearish;
+    const keywordMatched = filtered.filter((a) =>
+      includesAny(`${a.title}\n${a.metadata.description ?? ''}`, needles)
+    );
+    // If nothing matches, don’t show an empty page; just fall back to recency.
+    filtered = keywordMatched.length ? keywordMatched : filtered;
+  } else if (filter === 'important') {
+    filtered = filtered.filter((a) => a.currencies.some((c) => c.code === 'BTC' || c.code === 'ETH') || includesAny(a.title, ['sec', 'etf', 'regulat']));
+  }
+
+  // Sorting rules
+  const byPublishedDesc = (a: NewsArticle, b: NewsArticle) =>
+    new Date(b.published_at).getTime() - new Date(a.published_at).getTime();
+
+  if (filter === 'hot') {
+    filtered = [...filtered].sort((a, b) => (b.votes.positive - a.votes.positive) || byPublishedDesc(a, b));
+  } else {
+    filtered = [...filtered].sort(byPublishedDesc);
+  }
+
+  return filtered;
+}
+
 function App() {
   const [darkMode, setDarkMode] = useState(false);
-  const [articles, setArticles] = useState<NewsArticle[]>([]);
+  const [allArticles, setAllArticles] = useState<NewsArticle[]>(SAMPLE_ARTICLES);
   const [filter, setFilter] = useState<NewsFilter>('hot');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [savedIds, setSavedIds] = useState<number[]>(() => {
+    try {
+      const raw = localStorage.getItem(SAVED_IDS_KEY);
+      const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+      if (Array.isArray(parsed)) return parsed.filter((x): x is number => typeof x === 'number');
+      return [];
+    } catch {
+      return [];
+    }
+  });
 
   useEffect(() => {
-    const fetchNews = async () => {
-      try {
-        setLoading(true);
-        // Filter sample data based on search and filter
-        const filteredArticles = SAMPLE_ARTICLES.filter(article => {
-          const matchesSearch = search
-            ? article.currencies.some(currency => 
-                currency.code.toLowerCase().includes(search.toLowerCase()) ||
-                currency.title.toLowerCase().includes(search.toLowerCase())
-              )
-            : true;
-          
-          // Simple filter logic for demonstration
-          const matchesFilter = filter === 'hot' 
-            ? article.votes.positive > 30
-            : filter === 'rising'
-            ? article.votes.positive > 20
-            : true;
-          
-          return matchesSearch && matchesFilter;
-        });
-        
-        setArticles(filteredArticles);
-      } catch (error) {
-        console.error('Error processing news:', error instanceof Error ? error.message : 'Unknown error');
-        setArticles([]);
-      } finally {
-        setLoading(false);
-      }
-    };
+    localStorage.setItem(SAVED_IDS_KEY, JSON.stringify(savedIds));
+  }, [savedIds]);
 
-    fetchNews();
-  }, [filter, search]);
+  const toggleSaved = (id: number) => {
+    setSavedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const loadNews = useCallback(async () => {
+    const controller = new AbortController();
+    try {
+      setLoading(true);
+      setError(null);
+      const live = await fetchLatestNews({ signal: controller.signal });
+      if (live.length) {
+        setAllArticles(live);
+      } else {
+        setError('Live news API returned no articles. Showing sample articles.');
+        setAllArticles(SAMPLE_ARTICLES);
+      }
+    } catch (e) {
+      const msg = axios.isAxiosError(e)
+        ? e.response?.data?.Message ?? e.response?.status ?? e.message
+        : e instanceof Error
+          ? e.message
+          : 'Unknown error';
+      const reason = typeof msg === 'number' ? `HTTP ${msg}` : String(msg);
+      console.error('Error fetching live news:', e);
+      setError(`Live news unavailable (${reason}). Showing sample articles.`);
+      setAllArticles(SAMPLE_ARTICLES);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadNews();
+  }, [loadNews]);
+
+  const visibleArticles = useMemo(
+    () => filterAndSortArticles({ all: allArticles, filter, search, savedIds }),
+    [allArticles, filter, search, savedIds]
+  );
 
   useEffect(() => {
     if (darkMode) {
@@ -159,13 +234,31 @@ function App() {
                     <NewsFilters currentFilter={filter} onFilterChange={setFilter} />
                   </div>
 
+                  {error && (
+                    <div className="mb-6 rounded-lg border border-yellow-300 bg-yellow-50 text-yellow-900 px-4 py-3 dark:border-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-100 flex flex-wrap items-center justify-between gap-2">
+                      <span>{error}</span>
+                      <button
+                        type="button"
+                        onClick={() => { setError(null); loadNews(); }}
+                        className="px-3 py-1 rounded bg-yellow-200 dark:bg-yellow-800 hover:bg-yellow-300 dark:hover:bg-yellow-700 font-medium"
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                     <div className="lg:col-span-2 space-y-6">
                       {loading ? (
                         <div className="text-center py-8">Loading...</div>
-                      ) : articles.length > 0 ? (
-                        articles.map((article) => (
-                          <NewsCard key={article.id} article={article} />
+                      ) : visibleArticles.length > 0 ? (
+                        visibleArticles.map((article) => (
+                          <NewsCard
+                            key={article.id}
+                            article={article}
+                            isSaved={savedIds.includes(article.id)}
+                            onToggleSaved={toggleSaved}
+                          />
                         ))
                       ) : (
                         <div className="text-center py-8 text-gray-500 dark:text-gray-400">
@@ -174,13 +267,16 @@ function App() {
                       )}
                     </div>
                     <div className="space-y-6">
-                      <TrendingKeywords articles={articles} />
+                      <TrendingKeywords articles={visibleArticles} />
                     </div>
                   </div>
                 </>
               }
             />
-            <Route path="/news/:id" element={<NewsDetail articles={articles} />} />
+            <Route
+              path="/news/:id"
+              element={<NewsDetail articles={allArticles} savedIds={savedIds} onToggleSaved={toggleSaved} />}
+            />
           </Routes>
         </main>
       </div>
