@@ -29,6 +29,4 @@ npm run dev
 ```
 
 The app will be available at `http://localhost:5173` 
-## 📄 License
-
-This project is private and not licensed for public use.
+<img width="1365" height="485" alt="image" src="https://github.com/user-attachments/assets/3203fbc3-7e81-464b-be0c-e5d6df472ec4" />
